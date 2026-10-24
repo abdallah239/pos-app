@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Prisma
+.prisma/
+dev.db
+
+# Next.js
+.next/
+out/
+
+# Environment
+.env
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Prisma Client Generation
+node_modules/.prisma/

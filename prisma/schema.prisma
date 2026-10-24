@@ -1,0 +1,374 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// === Core Models ===
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  role         String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  products           Product[]
+  sessions           Session[]
+  inventoryMovements InventoryMovement[]
+  purchaseInvoices   PurchaseInvoice[]
+  sales              Sale[]
+  cashShifts         CashShift[]
+  expenses           Expense[]
+  auditLogs          AuditLog[]
+  SaleReturn         SaleReturn[]
+  Payment            Payment[]
+  CashMovement       CashMovement[]
+  StoreSettings      StoreSettings[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  tokenHash String
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// === Product & Category Management ===
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  slug        String   @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+model Product {
+  id                 String    @id @default(uuid())
+  name               String
+  description        String?
+  price              Int // stored in minor currency units (cents) - exact arithmetic
+  sku                String    @unique
+  barcode            String? // optional barcode
+  categoryId         String
+  category           Category? @relation(fields: [categoryId], references: [id])
+  brand              String?
+  unit               String // e.g., "pcs", "kg", "liter", "set"
+  trackInventory     Boolean   @default(true)
+  allowNegativeStock Boolean   @default(false)
+  minStockLevel      Int       @default(0)
+  isActive           Boolean   @default(true)
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id])
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Inventory movements
+  inventoryMovements  InventoryMovement[]
+  PurchaseInvoiceLine PurchaseInvoiceLine[]
+  SaleItem            SaleItem[]
+  SaleReturnItem      SaleReturnItem[]
+}
+
+// === Inventory & Stock Control ===
+
+model InventoryMovement {
+  id            String   @id @default(uuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  type          String // "opening", "incoming", "outgoing", "adjustment", "return", "damage", "expired"
+  quantity      Int // positive for incoming, negative for outgoing
+  referenceId   String?
+  referenceType String?
+  description   String?
+  createdById   String?
+  createdBy     User?    @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+}
+
+// === Purchasing & Supplier Management ===
+
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  taxId       String?
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseInvoices PurchaseInvoice[]
+  payments         SupplierPayment[]
+}
+
+model SupplierPayment {
+  id            String   @id @default(uuid())
+  supplierId    String
+  supplier      Supplier @relation(fields: [supplierId], references: [id])
+  amount        Int // minor currency units (cents)
+  paymentDate   DateTime
+  paymentMethod String
+  reference     String?
+  createdAt     DateTime @default(now())
+}
+
+// PurchaseInvoice model
+model PurchaseInvoice {
+  id              String    @id @default(uuid())
+  supplierId      String
+  supplier        Supplier  @relation(fields: [supplierId], references: [id])
+  invoiceNumber   String
+  issueDate       DateTime
+  dueDate         DateTime?
+  status          String // "draft", "received", "paid", "cancelled"
+  totalAmount     Int // minor currency units (cents)
+  discountPercent Float     @default(0)
+  netAmount       Int // minor currency units (cents)
+  paidAmount      Int       @default(0)
+  remainingAmount Int // computed: netAmount - paidAmount
+  createdBy       User      @relation(fields: [createdById], references: [id])
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  lineItems PurchaseInvoiceLine[]
+  Payment   Payment[]
+}
+
+model PurchaseInvoiceLine {
+  id                String          @id @default(uuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id])
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id])
+  description       String
+  quantity          Int
+  unitPrice         Int // minor currency units (cents) per unit
+  totalPrice        Int // minor currency units (cents)
+}
+
+// === Customer Management ===
+
+model Customer {
+  id                 String   @id @default(uuid())
+  name               String
+  email              String?
+  phone              String?
+  address            String?
+  taxId              String?
+  creditLimit        Int // minor currency units (cents), 0 means no limit
+  totalSpent         Int      @default(0) // minor currency units (cents)
+  outstandingBalance Int      @default(0) // minor currency units (cents)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  payments   CustomerPayment[]
+  sales      Sale[]
+  SaleReturn SaleReturn[]
+  Payment    Payment[]
+}
+
+model CustomerPayment {
+  id            String   @id @default(uuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+  amount        Int // minor currency units (cents)
+  paymentDate   DateTime
+  paymentMethod String
+  reference     String?
+  createdAt     DateTime @default(now())
+}
+
+// === POS & Sales ===
+
+model Sale {
+  id              String     @id @default(uuid())
+  invoiceNumber   String
+  referenceNumber String? // for tracking
+  cashierId       String
+  cashier         User       @relation(fields: [cashierId], references: [id])
+  customerId      String?
+  customer        Customer?  @relation(fields: [customerId], references: [id])
+  subtotal        Int // minor currency units (cents) before discounts
+  discountAmount  Int // minor currency units (cents)
+  discountReason  String?
+  taxAmount       Int // calculated tax
+  totalAmount     Int // final total
+  paymentMethod   String
+  status          String // "pending", "completed", "voided", "refunded"
+  shiftId         String?
+  shift           CashShift? @relation(fields: [shiftId], references: [id])
+  notes           String?
+  createdAt       DateTime   @default(now())
+
+  items      SaleItem[]
+  SaleReturn SaleReturn[]
+  Payment    Payment[]
+}
+
+model SaleItem {
+  id         String  @id @default(uuid())
+  saleId     String
+  sale       Sale    @relation(fields: [saleId], references: [id])
+  productId  String
+  product    Product @relation(fields: [productId], references: [id])
+  name       String // snapshot of product name at time of sale
+  quantity   Int
+  unitPrice  Int // price at time of sale (minor currency units)
+  totalPrice Int // total for this line item (minor currency units)
+  discount   Int // discount amount for this item (minor currency units)
+  barcode    String? // snapshot barcode at time of sale
+}
+
+model SaleReturn {
+  id             String    @id @default(uuid())
+  originalSaleId String
+  originalSale   Sale      @relation(fields: [originalSaleId], references: [id], onDelete: Cascade)
+  cashierId      String
+  cashier        User      @relation(fields: [cashierId], references: [id])
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  reason         String
+  status         String // "pending", "approved", "completed"
+  subtotal       Int // minor currency units (cents)
+  discountAmount Int // minor currency units (cents)
+  refundAmount   Int // minor currency units (cents)
+  restocked      Boolean   @default(true) // whether items were restocked
+  createdAt      DateTime  @default(now())
+
+  items SaleReturnItem[]
+}
+
+model SaleReturnItem {
+  id          String     @id @default(uuid())
+  returnId    String
+  return      SaleReturn @relation(fields: [returnId], references: [id])
+  productId   String
+  product     Product    @relation(fields: [productId], references: [id])
+  name        String
+  quantity    Int
+  refundPrice Int // price at time of return (minor currency units)
+  totalRefund Int // total refund for this item
+}
+
+// === Payments ===
+
+model Payment {
+  id                String           @id @default(uuid())
+  saleId            String?
+  sale              Sale?            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  purchaseInvoiceId String?
+  purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  customerId        String?
+  customer          Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  amount            Int // minor currency units (cents)
+  paymentMethod     String
+  status            String // "completed", "failed", "refunded"
+  transactionId     String? // external payment gateway transaction ID
+  recordedBy        User             @relation(fields: [recordedById], references: [id])
+  recordedById      String
+  recordedAt        DateTime         @default(now())
+}
+
+// === Cash Register & Shifts ===
+
+model CashShift {
+  id              String    @id @default(uuid())
+  cashierId       String
+  cashier         User      @relation(fields: [cashierId], references: [id])
+  openingBalance  Int // minor currency units (cents)
+  openingAt       DateTime
+  closingAt       DateTime?
+  closingBalance  Int? // counted actual
+  expectedClosing Int // calculated: opening + sales - refunds + adjustments - payments
+  discrepancy     Int // actual - expected
+  status          String // "open", "closed", "pending_reconciliation"
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  cashMovements CashMovement[]
+  Sale          Sale[]
+}
+
+model CashMovement {
+  id          String    @id @default(uuid())
+  shiftId     String
+  shift       CashShift @relation(fields: [shiftId], references: [id])
+  type        String // "cash_in", "cash_out", "petty_cash"
+  amount      Int // minor currency units (cents)
+  description String
+  reference   String? // receipt number, transfer ID, etc.
+  createdAt   DateTime  @default(now())
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id])
+}
+
+// === Expenses ===
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  expenses Expense[]
+}
+
+model Expense {
+  id            String          @id @default(uuid())
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+  amount        Int // minor currency units (cents)
+  date          DateTime
+  paymentMethod String
+  description   String
+  reference     String? // receipt, invoice, etc.
+  createdById   String
+  createdBy     User            @relation(fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
+}
+
+// === Audit Log ===
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String // e.g., "Product", "Sale", "User", "Inventory"
+  entityId  String?
+  details   String? // JSON string describing changes
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// === Store Settings ===
+
+model StoreSettings {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([key])
+}
